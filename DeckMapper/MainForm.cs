@@ -40,7 +40,7 @@ internal sealed class MainForm : Form
         _fixAll.Dock = DockStyle.Right;
         _fixAll.Margin = new Padding(0);
 
-        var testerHost = new Panel { Dock = DockStyle.Bottom, Height = 52, Padding = new Padding(10, 6, 10, 6) };
+        var testerHost = new Panel { Dock = DockStyle.Bottom, Height = 64, Padding = new Padding(10, 6, 10, 6) };
         testerHost.Controls.Add(_tester);
         var status = new StatusStrip();
         status.Items.Add(_status);
@@ -68,9 +68,13 @@ internal sealed class MainForm : Form
         _fixAll.Click += (_, _) => FixAll();
         _fPreset.Click += (_, _) => FKeysFirst();
         _backups.Click += async (_, _) => await BackupsAsync();
+        // Last few things Windows received, newest first, so repeats (a looping macro) are easy to see.
+        var history = new List<string>();
         _tester.KeyPressed += (code, held, name) =>
         {
-            _tester.Shown = "Windows received:  " + (code == 0 ? name : held.Count > 1 ? KeyCodes.ComboName(held) : KeyCodes.KeyName(code));
+            history.Insert(0, code == 0 ? name : held.Count > 1 ? KeyCodes.ComboName(held) : KeyCodes.KeyName(code));
+            if (history.Count > 12) history.RemoveAt(history.Count - 1);
+            _tester.Shown = $"Windows received:  {history[0]}\n{string.Join("  ·  ", history.Skip(1))}";
             _tester.Invalidate();
         };
 

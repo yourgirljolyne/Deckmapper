@@ -11,12 +11,12 @@ internal sealed class MacroDialog : Form
         Dock = DockStyle.Fill, View = View.Details, FullRowSelect = true, HideSelection = false, MultiSelect = true, GridLines = false,
         HeaderStyle = ColumnHeaderStyle.Nonclickable,
     };
-    private readonly RadioButton _once = new() { Text = "Play the whole macro once per press (not supported yet)", AutoSize = true, Enabled = false };
-    private readonly RadioButton _held = new() { Text = "Runs while the key is held, stops when you let go", AutoSize = true, Checked = true };
+    private readonly RadioButton _once = new() { Text = "Play the whole macro once per press", AutoSize = true, Checked = true };
+    private readonly RadioButton _held = new() { Text = "Run while the key is held, stop when you let go", AutoSize = true };
     private readonly Label _total = new() { AutoSize = true, ForeColor = SystemColors.GrayText, Margin = new Padding(0, 6, 0, 0) };
     private readonly Button _edit = Side("Edit…"), _delete = Side("Delete"), _up = Side("Move up"), _down = Side("Move down");
 
-    public Macro Result => new([.. _steps], true);
+    public Macro Result => new([.. _steps], _held.Checked);
 
     public MacroDialog(Macro? start)
     {
@@ -28,6 +28,7 @@ internal sealed class MacroDialog : Form
         StartPosition = FormStartPosition.CenterParent;
         ShowInTaskbar = false;
         MinimizeBox = false;
+        if (start?.StopOnRelease == true) _held.Checked = true;
 
         _list.Columns.Add("#", 44, HorizontalAlignment.Right);
         _list.Columns.Add("Step", 420);

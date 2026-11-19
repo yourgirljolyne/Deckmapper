@@ -68,7 +68,10 @@ Tested on the keyboard, 2026-11-19:
 - Mouse buttons (3, 4) and scrolling (9) did nothing. An absolute move (6) did nothing either way round.
 - A macro with relative/absolute moves (5, 6) and 2-byte waits (7) came out as stray presses of C and D (HID 6 and 7), so the
   firmware seems to read those bytes as something else. DeckMapper writes long waits as chains of 1-byte waits.
-- **Assignment options 49** (Web Hub's play-once: press, stop on another action, stop on profile change) made the macro **repeat forever**, about once per run time, until it was removed. DeckMapper only writes `0x41` (press, stop on release).
+- **Assignment options 49** (Web Hub's play-once: press, stop on another action, stop on profile change) made the macro **repeat forever**, about once per run time, until it was removed. Never write it.
+- Options **1** (press only) plays the macro exactly once, even while the key is held. DeckMapper's "play once".
+- Options **0x41** (press, stop on release) runs while held and stops on release. DeckMapper's "while held".
+- Also played once on a quick tap: 9 (press, stop on next press), 2 (on release), 0x8041 (press, stop on release, stop on hold release).
 
 ## Dial modes file
 

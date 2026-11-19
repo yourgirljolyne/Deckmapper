@@ -15,10 +15,10 @@ The keyboard keeps a separate layer for each modifier: one for the key alone, on
 ## What it does
 
 - **Main layer and FN layer.** Any key can send another key, a shortcut (record it, e.g. Ctrl + Shift + Esc), a media/app key, a mouse button, or nothing.
-- **Macros.** Record what you type (with the time between keys) or build it step by step: key presses, key down / key up, waits. A macro runs while you hold its key and stops when you let go. The keyboard only plays keys and waits: mouse clicks, scrolling and mouse moves don't work in its macros, so DeckMapper doesn't offer them.
+- **Macros.** Record what you type (with the time between keys) or build it step by step: key presses, key down / key up, waits. A macro plays once per press, or, if you pick that, runs while you hold its key and stops when you let go. The keyboard only plays keys and waits: mouse clicks, scrolling and mouse moves don't work in its macros, so DeckMapper doesn't offer them.
 - **Volume dial.** Add, remove, reorder and recolour its modes (volume, scrolling, zoom, switching apps, track control, brightness), or give it custom actions for turn left, turn right and press.
 - **F-keys first preset.** F1–F12 send F-keys, and FN + F7–F12 control media.
-- **Key tester.** Click the strip at the bottom and press keys to see exactly what Windows receives. Alt + F4 won't close anything there.
+- **Key tester.** Click the strip at the bottom and press keys to see exactly what Windows receives, with a short history so repeats stand out. Alt + F4 won't close anything there.
 - **Backups.** Before every write, the current setup is saved under `%LOCALAPPDATA%\DeckMapper\backups`. **Backups…** puts one back.
 
 It leaves lighting, macros made in Web Hub, profiles and the screen alone. Assignments it doesn't understand are kept as they are.

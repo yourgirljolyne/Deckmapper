@@ -29,11 +29,11 @@ public sealed record MacroStep(StepKind Kind, int A, int B = 0)
 /// <summary>A macro: its steps and whether letting go of the key stops it.</summary>
 public sealed record Macro(MacroStep[] Steps, bool StopOnRelease)
 {
-    // Assignment options. Web Hub's "play once" (press | stop on another action | stop on profile change = 49) makes this
-    // keyboard LOOP the macro until another key is pressed (tested 2026-11-19), so it is not offered. While held =
-    // press | stop on release, the same options plain key remaps use.
-    public const ushort OptionsWhileHeld = 1 | 64, OptionsLoopsForever = 1 | 16 | 32;
-    public const ushort OptionsOnce = OptionsWhileHeld; // until a real play-once setting is found
+    // Assignment options, tested on the keyboard 2026-11-19:
+    // - press only (1) plays the macro exactly once, even while the key is held;
+    // - press | stop on release (0x41) runs while held and stops when let go;
+    // - Web Hub's play-once, press | stop on another action | stop on profile change (49), LOOPS forever. Never written.
+    public const ushort OptionsOnce = 1, OptionsWhileHeld = 1 | 64;
     public ushort Options => StopOnRelease ? OptionsWhileHeld : OptionsOnce;
     public const ushort Header = 12460;
     public const int MaxSteps = 1000;
