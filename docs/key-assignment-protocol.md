@@ -42,6 +42,10 @@ Layer flags: 0 alone, 1 FN, 2 FN2, 4 Ctrl, 8 Alt, 16 Shift. Options are trigger 
 
 **The Alt + F4 problem:** Web Hub writes only layer 0 and clears only bit 0, so with Alt held the key uses its built-in Alt layer (the media function). Adding the same action for layers 4, 8 and 16 and clearing bits 3–5 fixes it. Verified on the keyboard, including Ctrl/Alt/Shift with remapped F-keys.
 
+Tested on the keyboard, 2026-11-19:
+- A modifier layer doesn't release the modifier. With F7's Ctrl/Alt/Shift layers set to X/Y/Z, Windows got Ctrl + X, Alt + Y and Shift + Z. So a modifier layer can't turn Ctrl + key into an unrelated key; it only changes the key that goes with the held modifier.
+- Combination flags (12 Ctrl+Alt, 20 Ctrl+Shift, 24 Alt+Shift, 28 all three) are ignored: Ctrl + Alt + F7 still sent F7 with the modifiers.
+
 ## Action files
 
 Remap action: `u16 1902, u8 type, u16 duration (0), 3 zero bytes`, then:

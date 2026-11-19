@@ -101,25 +101,6 @@ public sealed class KeyboardState
     /// <summary>Key order in the loaded assignments file (kept on save so an unchanged layout writes nothing).</summary>
     public List<byte> AssignOrder = [];
 
-    /// <summary>
-    /// What a key does on one layer as the edited state stands: its action, and whether that comes from
-    /// "also when Ctrl, Alt or Shift is held". Default means the key's built-in function for that layer.
-    /// </summary>
-    public (KeyAction Action, bool FromMain) Layer(byte key, ushort flag)
-    {
-        if (!Keys.TryGetValue(key, out var c)) return (KeyAction.Default, false);
-        if (flag == Flags.Main) return (c.Main, false);
-        if (flag == Flags.Fn) return (c.Fn, false);
-        bool mod = flag is Flags.Ctrl or Flags.Alt or Flags.Shift;
-        if (mod && c.WithModifiers && c.Main.Kind != ActionKind.Default) return (c.Main, true);
-        var o = c.Others.FirstOrDefault(x => x.Flags == flag);
-        if (o != null)
-            return (Files.TryGetValue(o.FileId, out var d) ? KeyStore.DecodeAction(d) : new(ActionKind.Kept, [], $"Action file {o.FileId}"), false);
-        int bit = Flags.Bit(flag);
-        bool cleared = bit >= 0 && (c.DisabledMask & (1 << bit)) != 0;
-        return (cleared ? KeyAction.Disabled : KeyAction.Default, false);
-    }
-
     public KeyboardState Clone()
     {
         var s = (KeyboardState)MemberwiseClone();
