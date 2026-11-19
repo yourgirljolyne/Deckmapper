@@ -47,8 +47,12 @@ public sealed class KeyConfig
     /// <summary>Options of the loaded assignment for Kept actions (macros, text).</summary>
     public ushort MainOptions, FnOptions;
     public byte OriginalMapByte;
+    /// <summary>Layers (mapping bits) that were switched off with no assignment when loaded, i.e. really disabled.</summary>
+    public byte DisabledMask;
     /// <summary>A key id that isn't on DeckMapper's layout: its assignments and mapping byte are kept exactly.</summary>
     public bool Foreign;
+    /// <summary>Set from DeckMapper's settings: don't flag this key's Ctrl/Alt/Shift gap (kept on the PC, not the keyboard).</summary>
+    public bool IgnoreGap;
 
     public KeyConfig Clone()
     {
@@ -58,7 +62,10 @@ public sealed class KeyConfig
     }
 
     /// <summary>Main layer remapped but Ctrl/Alt/Shift still fall back to the default (Web Hub's behaviour).</summary>
-    public bool ModifierGap => Main.Kind is not (ActionKind.Default or ActionKind.Disabled) && !WithModifiers
+    public bool ModifierGap => HasModifierGap && !IgnoreGap;
+
+    /// <summary>The gap itself, whether or not the warning is ignored for this key.</summary>
+    public bool HasModifierGap => Main.Kind is not (ActionKind.Default or ActionKind.Disabled) && !WithModifiers
         && !Others.Any(o => o.Flags is Flags.Ctrl or Flags.Alt or Flags.Shift);
 }
 
@@ -93,6 +100,25 @@ public sealed class KeyboardState
     public string ProfileName = "";
     /// <summary>Key order in the loaded assignments file (kept on save so an unchanged layout writes nothing).</summary>
     public List<byte> AssignOrder = [];
+
+    /// <summary>
+    /// What a key does on one layer as the edited state stands: its action, and whether that comes from
+    /// "also when Ctrl, Alt or Shift is held". Default means the key's built-in function for that layer.
+    /// </summary>
+    public (KeyAction Action, bool FromMain) Layer(byte key, ushort flag)
+    {
+        if (!Keys.TryGetValue(key, out var c)) return (KeyAction.Default, false);
+        if (flag == Flags.Main) return (c.Main, false);
+        if (flag == Flags.Fn) return (c.Fn, false);
+        bool mod = flag is Flags.Ctrl or Flags.Alt or Flags.Shift;
+        if (mod && c.WithModifiers && c.Main.Kind != ActionKind.Default) return (c.Main, true);
+        var o = c.Others.FirstOrDefault(x => x.Flags == flag);
+        if (o != null)
+            return (Files.TryGetValue(o.FileId, out var d) ? KeyStore.DecodeAction(d) : new(ActionKind.Kept, [], $"Action file {o.FileId}"), false);
+        int bit = Flags.Bit(flag);
+        bool cleared = bit >= 0 && (c.DisabledMask & (1 << bit)) != 0;
+        return (cleared ? KeyAction.Disabled : KeyAction.Default, false);
+    }
 
     public KeyboardState Clone()
     {
@@ -226,6 +252,8 @@ public sealed class KeyStore : IDisposable
                 return Cleared(f) ? KeyAction.Disabled : KeyAction.Default;
             }
 
+            foreach (var f in new[] { Flags.Main, Flags.Fn, Flags.Fn2, Flags.Ctrl, Flags.Alt, Flags.Shift })
+                if (Cleared(f) && Get(f) == null) c.DisabledMask |= (byte)(1 << Flags.Bit(f));
             c.Main = await LayerAsync(Flags.Main);
             c.Fn = await LayerAsync(Flags.Fn);
             c.MainFile = Get(Flags.Main)?.FileId ?? 0;
@@ -447,7 +475,7 @@ public sealed class KeyStore : IDisposable
             // Ctrl/Alt/Shift layers disabled in the original without an assignment stay disabled.
             if (!c.WithModifiers)
                 foreach (var f in new[] { Flags.Ctrl, Flags.Alt, Flags.Shift })
-                    if (orig != 0 && (orig & (1 << Flags.Bit(f))) == 0 && !entries.Any(e => e.Flags == f)) Clear(f);
+                    if ((c.DisabledMask & (1 << Flags.Bit(f))) != 0 && !entries.Any(e => e.Flags == f)) Clear(f);
 
             if (orig != 0 && 2 + key < map.Length) map[2 + key] = (byte)bits;
             else if (entries.Count > 0) plan.Notes.Add($"key {key} is not in the key mapping file; skipped");

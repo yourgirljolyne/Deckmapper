@@ -17,7 +17,7 @@ internal static class Program
                 return cmd switch
                 {
                     "dump" => Dump().GetAwaiter().GetResult(),
-                    "check" => Check().GetAwaiter().GetResult(),
+                    "check" => Check(args.Length > 1 ? byte.Parse(args[1]) : null).GetAwaiter().GetResult(),
                     _ => Restore(args[1]).GetAwaiter().GetResult(),
                 };
             }
@@ -60,12 +60,17 @@ internal static class Program
         return 0;
     }
 
-    /// <summary>Loads, then plans a save with no edits: should write nothing. Read-only.</summary>
-    private static async Task<int> Check()
+    /// <summary>
+    /// Loads, then plans a save with no edits: should write nothing. With a key id, plans turning off that key's
+    /// "also with Ctrl/Alt/Shift" instead and shows what would be written. Read-only either way.
+    /// </summary>
+    private static async Task<int> Check(byte? unmirror)
     {
         using var store = new KeyStore();
         var s = await store.LoadAsync();
-        var r = await store.SaveAsync(s, s.Clone(), dryRun: true);
+        var edited = s.Clone();
+        if (unmirror is { } k) edited.Keys[k].WithModifiers = false;
+        var r = await store.SaveAsync(s, edited, dryRun: true);
         Console.WriteLine(r.Writes.Count == 0 && r.Deleted.Count == 0 ? "OK: an unchanged layout writes nothing." : "Unchanged layout would still write:");
         foreach (var id in r.Writes)
         {

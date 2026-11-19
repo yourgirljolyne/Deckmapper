@@ -26,7 +26,7 @@ internal sealed class MainForm : Form
     {
         Text = "DeckMapper";
         Font = new Font("Segoe UI", 9.5f);
-        ClientSize = new Size(1380, 560);
+        ClientSize = new Size(1380, 680);
         MinimumSize = new Size(1100, 560);
         StartPosition = FormStartPosition.CenterScreen;
 
@@ -165,6 +165,7 @@ internal sealed class MainForm : Form
     {
         _edited = s;
         _dirty = dirty;
+        foreach (var (key, c) in s.Keys) c.IgnoreGap = Settings.IsIgnored(key);
         _view.State = s;
         ShowEditor();
         UpdateUi();
@@ -219,7 +220,7 @@ internal sealed class MainForm : Form
         if (_edited == null || _selected == null)
         {
             flow.Controls.Add(Para(_edited == null ? "Reading the keyboard…" :
-                "Click a key to change what it does.\n\nBlue keys are changed from the default. An orange corner means Ctrl, Alt or Shift + that key still does the key's default (that's why Alt + F4 needed FN).\n\nChanges are only written when you press Apply to keyboard.", 320));
+                "Click a key to change what it does and see all its layers.\n\nBlue keys are changed from the default. An orange corner means Ctrl, Alt or Shift + that key still does the key's default (that's why Alt + F4 needed FN). You can turn that warning off per key.\n\nChanges are only written when you press Apply to keyboard.", 320));
         }
         else if (_selected == KeyboardView.DialId) DialEditor(flow);
         else KeyEditor(flow, _selected.Value);
@@ -249,30 +250,90 @@ internal sealed class MainForm : Form
             Text = "Also when Ctrl, Alt or Shift is held", AutoSize = true, Checked = c.WithModifiers, Margin = new Padding(0, 10, 0, 0),
             Visible = !fn && c.Main.Kind != ActionKind.Default,
         };
-        var modsNote = Para("Leave this on. Without it, Alt + this key does the key's default instead (Web Hub remaps work that way, which is why Alt + F4 broke).");
+        var modsNote = Para("Without it, Ctrl/Alt/Shift + this key do the built-in function instead (how Web Hub remaps work).");
         modsNote.Visible = mods.Visible;
         flow.Controls.Add(mods);
         flow.Controls.Add(modsNote);
+
+        // Every layer of this key, kept up to date as you edit.
+        flow.Controls.Add(Head("All layers"));
+        var table = new TableLayoutPanel { AutoSize = true, ColumnCount = 2, Margin = new Padding(0, 0, 0, 4), MaximumSize = new Size(330, 0) };
+        table.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 92));
+        table.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        flow.Controls.Add(table);
+        var layers = new List<(ushort flag, string name)>
+        {
+            (Flags.Main, "Alone"), (Flags.Fn, "FN +"), (Flags.Ctrl, "Ctrl +"), (Flags.Alt, "Alt +"), (Flags.Shift, "Shift +"),
+        };
+        if (c.Others.Any(o => o.Flags == Flags.Fn2)) layers.Add((Flags.Fn2, "FN2 +"));
+        var values = new Dictionary<ushort, Label>();
+        foreach (var (flag, name) in layers)
+        {
+            bool current = fn ? flag == Flags.Fn : flag == Flags.Main;
+            var bold = new Font(Font, FontStyle.Bold);
+            table.Controls.Add(new Label { Text = name, AutoSize = true, Margin = new Padding(0, 2, 6, 2), Font = current ? bold : Font });
+            var v = new Label { AutoSize = true, MaximumSize = new Size(236, 0), Margin = new Padding(0, 2, 0, 2), Font = current ? bold : Font };
+            values[flag] = v;
+            table.Controls.Add(v);
+            if (flag is Flags.Main or Flags.Fn && !current)
+            {
+                v.Cursor = Cursors.Hand;
+                v.ForeColor = SystemColors.HotTrack;
+                v.Click += (_, _) => (flag == Flags.Fn ? _fnLayer : _mainLayer).Checked = true;
+                _tips.SetToolTip(v, "Switch to this layer");
+            }
+        }
+
+        var ignore = new CheckBox
+        {
+            Text = "Don't warn about Ctrl / Alt / Shift for this key", AutoSize = true, Checked = c.IgnoreGap, Margin = new Padding(0, 8, 0, 0),
+        };
+        var ignoreNote = Para("No orange corner, and Fix them all skips this key. Saved on this PC.");
+        flow.Controls.Add(ignore);
+        flow.Controls.Add(ignoreNote);
+
+        void RefreshLayers()
+        {
+            foreach (var (flag, _) in layers)
+            {
+                var (a, fromMain) = _edited!.Layer(id, flag);
+                string builtIn = flag switch
+                {
+                    Flags.Main => k.MainText,
+                    Flags.Fn => k.FnText,
+                    Flags.Ctrl => "Ctrl + " + k.MainText,
+                    Flags.Alt => "Alt + " + k.MainText,
+                    Flags.Shift => "Shift + " + k.MainText,
+                    _ => k.MainText,
+                };
+                values[flag].Text = a.Kind == ActionKind.Default ? $"{builtIn} (built-in)"
+                    : fromMain ? $"{a.Describe()} (same as alone)" : a.Describe();
+                values[flag].ForeColor = flag is Flags.Ctrl or Flags.Alt or Flags.Shift && c.ModifierGap ? Color.FromArgb(190, 100, 0)
+                    : values[flag].Cursor == Cursors.Hand ? SystemColors.HotTrack : SystemColors.ControlText;
+            }
+            ignore.Visible = ignoreNote.Visible = !fn && (c.HasModifierGap || c.IgnoreGap);
+        }
+        RefreshLayers();
 
         ed.Changed += (_, _) =>
         {
             if (fn) c.Fn = ed.Value; else c.Main = ed.Value;
             mods.Visible = modsNote.Visible = !fn && c.Main.Kind != ActionKind.Default;
             Changed();
+            RefreshLayers();
         };
-        mods.CheckedChanged += (_, _) => { c.WithModifiers = mods.Checked; Changed(); };
-
-        flow.Controls.Add(Head("Other layer"));
-        var other = fn ? c.Main : c.Fn;
-        var otherLink = new LinkLabel
+        mods.CheckedChanged += (_, _) => { c.WithModifiers = mods.Checked; Changed(); RefreshLayers(); };
+        ignore.CheckedChanged += (_, _) =>
         {
-            Text = (fn ? "Main: " : "FN + key: ") + KeyboardView.Describe(k, other, !fn), AutoSize = true, MaximumSize = new Size(320, 0),
+            c.IgnoreGap = ignore.Checked;
+            Settings.SetIgnored(id, ignore.Checked);
+            _view.Invalidate();
+            UpdateUi();
+            RefreshLayers();
         };
-        otherLink.LinkClicked += (_, _) => { (fn ? _mainLayer : _fnLayer).Checked = true; };
-        flow.Controls.Add(otherLink);
 
-        if (c.Others.Count > 0)
-            flow.Controls.Add(Para($"This key also has {c.Others.Count} other assignment{(c.Others.Count == 1 ? "" : "s")} (FN2 or a custom Ctrl/Alt/Shift layer from Web Hub). DeckMapper keeps {(c.Others.Count == 1 ? "it" : "them")} as is."));
+        if (c.Others.Any(o => o.Flags is not (Flags.Ctrl or Flags.Alt or Flags.Shift or Flags.Fn2)))
+            flow.Controls.Add(Para("This key also has assignments on layers DeckMapper doesn't show. They're kept as is."));
 
         var reset = Btn("Reset this key");
         reset.Margin = new Padding(0, 16, 0, 0);

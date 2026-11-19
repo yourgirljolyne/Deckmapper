@@ -10,7 +10,9 @@ DeckMapper is a small window with a picture of the keyboard. Click a key, pick w
 
 Out of the box the F-row does media things and FN + F4 is F4. If you remap F4 to F4 in Web Hub, plain F4 works, but **Alt + F4 doesn't**: you're back to Alt + FN + F4, two hands.
 
-The keyboard keeps a separate layer for each modifier: one for the key alone, one with FN, and one each with Ctrl, Alt and Shift held. Web Hub only fills in the first, so with Alt held the key falls back to its media default. DeckMapper writes the same action into the Ctrl, Alt and Shift layers too, so remapped keys behave like real keys. Keys that still have this gap get an orange corner, and **Fix them all** fixes every one at once.
+The keyboard keeps a separate layer for each modifier: one for the key alone, one with FN, and one each with Ctrl, Alt and Shift held. Web Hub only fills in the first, so with Alt held the key falls back to its media default. DeckMapper writes the same action into the Ctrl, Alt and Shift layers too, so remapped keys behave like real keys. Keys that still have this gap get an orange corner, and **Fix them all** fixes every one at once. If you want Ctrl/Alt/Shift + a key to keep its built-in function on purpose, tick **Don't warn about Ctrl / Alt / Shift for this key** and it's left alone (that choice is saved on your PC).
+
+Select a key to see **all its layers** at once: alone, FN, Ctrl, Alt, Shift (and FN2 if it has one), with what each does right now.
 
 ## What it does
 
