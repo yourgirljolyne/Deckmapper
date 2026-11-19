@@ -557,10 +557,32 @@ public sealed class KeyStore : IDisposable
                 Log?.Invoke($"delete unused {id}");
                 await b.DeleteFileAsync(id);
             }
+            status?.Report("Telling the keyboard to reload its keys");
+            await BumpCookieAsync(b, fresh.ProfileId);
         }
         finally { await b.SetPropertyAsync(Bragi.PropOperatingMode, Bragi.ModeSelfOperated); }
         foreach (var n in plan.Notes) Log?.Invoke(n);
         return result;
+    }
+
+    /// <summary>
+    /// Writes a new cookie (unix time) into bytes 2-5 of the profile file, as Web Hub does after every key change.
+    /// Without it the keyboard can keep playing stale assignments until it's replugged (seen 2026-11-20: three S keys
+    /// went silent after their action files were rewritten). Nothing else in the profile file changes.
+    /// </summary>
+    private async Task BumpCookieAsync(Bragi b, ushort profileId)
+    {
+        var p = await b.ReadFileAsync(profileId) ?? throw new BragiException($"Profile file {profileId} is missing.");
+        if (p.Length < 6) throw new BragiException($"Profile file {profileId} is too short.");
+        uint old = System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(p.AsSpan(2));
+        uint now = (uint)DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        if (now == old) now++;
+        var updated = (byte[])p.Clone();
+        System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(updated.AsSpan(2), now);
+        for (int i = 0; i < p.Length; i++)
+            if (p[i] != updated[i] && i is < 2 or > 5) throw new InvalidOperationException("cookie update would change more than the cookie");
+        Log?.Invoke($"cookie {old} -> {now}");
+        await b.WriteFileAsync(profileId, updated);
     }
 
     /// <summary>What a save wrote (or would write): file ids in write order, and DeckMapper files it deleted.</summary>
@@ -587,8 +609,8 @@ public sealed class KeyStore : IDisposable
     }
 
     /// <summary>
-    /// Puts a backup back: action files, then key mappings, assignments and dial modes. The profile file and the
-    /// profile list are never written. Returns the number of files written.
+    /// Puts a backup back: action files, then key mappings, assignments and dial modes, then a new profile cookie so the
+    /// keyboard reloads them. The rest of the profile file and the profile list are never written. Returns the number of files written.
     /// </summary>
     public async Task<int> RestoreAsync(string dir, IProgress<string>? status = null)
     {
@@ -615,6 +637,7 @@ public sealed class KeyStore : IDisposable
                 await b.WriteFileAsync(id, bytes);
                 written++;
             }
+            if (written > 0) await BumpCookieAsync(b, m.ProfileId);
         }
         finally { await b.SetPropertyAsync(Bragi.PropOperatingMode, Bragi.ModeSelfOperated); }
         return written;

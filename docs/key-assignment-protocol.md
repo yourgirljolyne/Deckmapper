@@ -21,7 +21,10 @@ File 15 is the profile list (`u16 header, u16 count, u16 profile ids`). The prof
 | 20…29 | gamepad curves, firmware data, actuation files, lighting playback |
 | 30 | u16 name length, then the name (+ NUL), then reset distances, rapid trigger, screen layout |
 
-DeckMapper never writes the profile file. Web Hub bumps its cookie after key changes, but the keyboard picks up new assignments without it.
+Web Hub writes a new cookie (unix time) into the profile file after every key change, and DeckMapper does the same
+after every Apply and Restore. It changes nothing else in the profile file. Without it, the keyboard usually picks up new
+assignments anyway, but not always: on 2026-11-20, after a restore rewrote several action files, three S keys sent
+nothing at all until the keyboard was replugged. With the cookie update, the same kind of change worked straight away.
 
 ## Key ids
 

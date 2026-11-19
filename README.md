@@ -21,7 +21,7 @@ The keyboard keeps a separate layer for each modifier: one for the key alone, on
 - **Key tester.** Click the strip at the bottom and press keys to see exactly what Windows receives, with a short history so repeats stand out. Alt + F4 won't close anything there.
 - **Backups.** Before every write, the current setup is saved under `%LOCALAPPDATA%\DeckMapper\backups`. **Backups…** puts one back.
 
-It leaves lighting, macros made in Web Hub, profiles and the screen alone. Assignments it doesn't understand are kept as they are.
+It leaves lighting, macros made in Web Hub, profiles and the screen alone. The one thing it writes in the profile is the same "changed" timestamp Web Hub writes, so the keyboard reloads its keys straight away. Assignments it doesn't understand are kept as they are.
 
 ## Get it running
 
