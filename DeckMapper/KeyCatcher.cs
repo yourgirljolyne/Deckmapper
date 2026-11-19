@@ -11,6 +11,8 @@ internal sealed class KeyCatcher : Control
 
     /// <summary>A key went down (code, or 0 for a key with no HID equivalent) with these keys held, in press order.</summary>
     public event Action<ushort, IReadOnlyList<ushort>, string>? KeyPressed;
+    /// <summary>A key that was down went up.</summary>
+    public event Action<ushort>? KeyReleased;
     /// <summary>Every key is up again.</summary>
     public event Action? AllReleased;
 
@@ -50,10 +52,14 @@ internal sealed class KeyCatcher : Control
             {
                 int vk = (int)m.WParam;
                 ushort code = KeyCodes.FromWindows(vk, (long)m.LParam);
-                if (vk == 0x2C && !_down.Contains(70)) KeyPressed?.Invoke(70, [70], ""); // Print Screen only sends key-up
-                _down.Remove(code);
+                if (vk == 0x2C && !_down.Contains(70)) { KeyPressed?.Invoke(70, [70], ""); KeyReleased?.Invoke(70); } // Print Screen only sends key-up
+                if (_down.Remove(code)) KeyReleased?.Invoke(code);
                 if (vk is 0x10 or 0x11 or 0x12) // generic Shift/Ctrl/Alt up: drop both sides
-                    _down.RemoveAll(c => vk == 0x10 ? c is 225 or 229 : vk == 0x11 ? c is 224 or 228 : c is 226 or 230);
+                    foreach (var c in _down.Where(c => vk == 0x10 ? c is 225 or 229 : vk == 0x11 ? c is 224 or 228 : c is 226 or 230).ToList())
+                    {
+                        _down.Remove(c);
+                        KeyReleased?.Invoke(c);
+                    }
                 if (_down.Count == 0) AllReleased?.Invoke();
                 return;
             }

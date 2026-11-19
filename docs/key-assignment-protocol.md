@@ -57,6 +57,19 @@ Remap action: `u16 1902, u8 type, u16 duration (0), 3 zero bytes`, then:
 Other headers: 12460 macro, 940 text. DeckMapper keeps those untouched.
 Web Hub takes file ids from 28000 upwards; DeckMapper takes new ones from 31999 downwards (SlotDeck uses 32699 downwards).
 
+## Macro files
+
+`u16 12460, u16 block count, 12 zero bytes`, then events packed into 8-byte blocks (an event never crosses a block; the rest of a block is zero):
+1 key down `u8 HID`, 2 key up, 3 mouse button down `u8`, 4 mouse button up, 5 relative move `i16 x, i16 y`, 6 absolute move `u16 x, u16 y`,
+7 wait `u16 ms`, 8 random wait, 9 vertical scroll `i8`, 10 horizontal scroll, 11 packed relative move (3 bytes), 12 wait `u8 ms`, 13 packed random wait, 14 wait `u24 ms`.
+
+Tested on the keyboard, 2026-11-19:
+- Macros run, but only **keys and waits** play: key down/up (1, 2) and the 1-byte wait (12) work.
+- Mouse buttons (3, 4) and scrolling (9) did nothing. An absolute move (6) did nothing either way round.
+- A macro with relative/absolute moves (5, 6) and 2-byte waits (7) came out as stray presses of C and D (HID 6 and 7), so the
+  firmware seems to read those bytes as something else. DeckMapper writes long waits as chains of 1-byte waits.
+- **Assignment options 49** (Web Hub's play-once: press, stop on another action, stop on profile change) made the macro **repeat forever**, about once per run time, until it was removed. DeckMapper only writes `0x41` (press, stop on release).
+
 ## Dial modes file
 
 `u16 22, u16 count`, then per mode: `u8 type, 4 bytes RGBA ring colour, u8 n`, then `n ×` `u8 trigger, u8 0, u16 options, u16 action file`.

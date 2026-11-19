@@ -3,7 +3,7 @@ using System.Text.Json;
 
 namespace DeckMapper;
 
-public enum ActionKind { Default, Disabled, Key, Media, Mouse, Kept }
+public enum ActionKind { Default, Disabled, Key, Media, Mouse, Macro, Kept }
 
 /// <summary>What a key (or a dial turn) does. Key = one or more HID usages pressed together.</summary>
 public sealed record KeyAction(ActionKind Kind, ushort[] Codes, string? KeptText = null)
@@ -13,9 +13,13 @@ public sealed record KeyAction(ActionKind Kind, ushort[] Codes, string? KeptText
     public static KeyAction Key(params ushort[] codes) => new(ActionKind.Key, codes);
     public static KeyAction Media(ushort code) => new(ActionKind.Media, [code]);
     public static KeyAction Mouse(ushort code) => new(ActionKind.Mouse, [code]);
+    public static KeyAction FromMacro(Macro m) => new(ActionKind.Macro, []) { Macro = m };
+
+    /// <summary>The steps, for <see cref="ActionKind.Macro"/>.</summary>
+    public Macro? Macro { get; init; }
 
     /// <summary>True for actions that live in an action file on the keyboard.</summary>
-    public bool NeedsFile => Kind is ActionKind.Key or ActionKind.Media or ActionKind.Mouse or ActionKind.Kept;
+    public bool NeedsFile => Kind is ActionKind.Key or ActionKind.Media or ActionKind.Mouse or ActionKind.Macro or ActionKind.Kept;
 
     public string Describe() => Kind switch
     {
@@ -24,10 +28,20 @@ public sealed record KeyAction(ActionKind Kind, ushort[] Codes, string? KeptText
         ActionKind.Key => Codes.Length == 1 ? KeyCodes.KeyName(Codes[0]) : KeyCodes.ComboName(Codes),
         ActionKind.Media => KeyCodes.MediaName(Codes[0]),
         ActionKind.Mouse => KeyCodes.MouseName(Codes[0]),
+        ActionKind.Macro => Macro!.Summary,
         _ => KeptText ?? "Kept as is",
     };
 
-    public bool Same(KeyAction o) => Kind == o.Kind && Codes.SequenceEqual(o.Codes) && KeptText == o.KeptText;
+    public bool Same(KeyAction o) => Kind == o.Kind && Codes.SequenceEqual(o.Codes) && KeptText == o.KeptText
+        && (Macro == null ? o.Macro == null : o.Macro != null && Macro.Same(o.Macro));
+
+    /// <summary>Assignment options to write: macros carry their own; keys keep what they had unless it was a macro's.</summary>
+    public ushort OptionsFor(ushort loaded) => Kind switch
+    {
+        ActionKind.Kept => loaded,
+        ActionKind.Macro => Macro!.Options,
+        _ => (loaded & 16) != 0 || loaded == 0 ? KeyStore.KeyOptions : loaded,
+    };
 }
 
 /// <summary>An assignment exactly as stored on the keyboard: layer flags, action file, trigger options.</summary>
@@ -114,7 +128,7 @@ public sealed class KeyboardState
 public sealed class KeyStore : IDisposable
 {
     private const ushort RemapHeader = 1902, MacroHeader = 12460, TextHeader = 940;
-    private const ushort KeyOptions = 0x41;   // TRIGGER_ON_PRESS_PRIMARY | STOP_ON_RELEASE_PRIMARY (what Web Hub writes)
+    public const ushort KeyOptions = 0x41;   // TRIGGER_ON_PRESS_PRIMARY | STOP_ON_RELEASE_PRIMARY (what Web Hub writes)
     private const ushort DialOptions = 1;     // TRIGGER_ON_EACH_DIAL_TICK
     /// <summary>DeckMapper takes new action file ids from here downwards (Web Hub counts up from 28000, SlotDeck down from 32699).</summary>
     public const ushort OwnTop = 31999, OwnBottom = 31000;
@@ -229,7 +243,11 @@ public sealed class KeyStore : IDisposable
             async Task<KeyAction> LayerAsync(ushort f)
             {
                 var ra = Get(f);
-                if (ra != null) return await ReadActionAsync(ra.FileId, s.Files);
+                if (ra != null)
+                {
+                    var act = await ReadActionAsync(ra.FileId, s.Files);
+                    return act.Macro is { } m ? KeyAction.FromMacro(m with { StopOnRelease = (ra.Options & 64) != 0 }) : act;
+                }
                 return Cleared(f) ? KeyAction.Disabled : KeyAction.Default;
             }
 
@@ -295,7 +313,8 @@ public sealed class KeyStore : IDisposable
     public static KeyAction DecodeAction(byte[] d)
     {
         ushort header = BinaryPrimitives.ReadUInt16LittleEndian(d);
-        if (header == MacroHeader) return new(ActionKind.Kept, [], "Macro (made in Web Hub)");
+        if (header == MacroHeader)
+            return Macro.Decode(d, false) is { } m ? KeyAction.FromMacro(m) : new(ActionKind.Kept, [], "Macro (made in Web Hub)");
         if (header == TextHeader) return new(ActionKind.Kept, [], "Text (made in Web Hub)");
         if (header != RemapHeader || d.Length < 10) return new(ActionKind.Kept, [], "Unknown action");
         switch (d[2])
@@ -315,6 +334,7 @@ public sealed class KeyStore : IDisposable
     /// <summary>Remap action file: u16 1902, type, u16 duration, 3 zero bytes, then the target(s).</summary>
     public static byte[] EncodeAction(KeyAction a)
     {
+        if (a.Kind == ActionKind.Macro) return a.Macro!.Encode();
         var o = new List<byte> { RemapHeader & 0xFF, RemapHeader >> 8, 0, 0, 0, 0, 0, 0 };
         switch (a.Kind)
         {
@@ -427,7 +447,7 @@ public sealed class KeyStore : IDisposable
             if (c.Main.NeedsFile)
             {
                 ushort file = c.Main.Kind == ActionKind.Kept ? c.MainFile : await FileForAsync(c.Main, c.MainFile);
-                ushort opt = c.MainOptions;
+                ushort opt = c.Main.OptionsFor(c.MainOptions);
                 entries.Add(new(Flags.Main, file, opt));
                 Clear(Flags.Main);
                 if (c.WithModifiers)
@@ -442,7 +462,7 @@ public sealed class KeyStore : IDisposable
             if (c.Fn.NeedsFile)
             {
                 ushort file = c.Fn.Kind == ActionKind.Kept ? c.FnFile : await FileForAsync(c.Fn, c.FnFile);
-                entries.Add(new(Flags.Fn, file, c.FnOptions));
+                entries.Add(new(Flags.Fn, file, c.Fn.OptionsFor(c.FnOptions)));
                 Clear(Flags.Fn);
             }
             else if (c.Fn.Kind == ActionKind.Disabled) Clear(Flags.Fn);
