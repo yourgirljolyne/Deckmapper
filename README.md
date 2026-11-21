@@ -25,9 +25,10 @@ It leaves lighting, macros made in Web Hub, profiles and the screen alone. The o
 
 ## Get it running
 
-1. Install the [.NET 10 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/10.0).
-2. Plug the keyboard in with the **USB cable** and close iCUE.
-3. Run `DeckMapper.exe`.
+1. Grab `DeckMapper.exe` from [Releases](../../releases), or build it yourself (below).
+2. Install the [.NET 10 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/10.0) if you don't have it.
+3. Plug the keyboard in with the **USB cable** and close iCUE.
+4. Run `DeckMapper.exe`.
 
 The profile needs key assignment files, which Web Hub creates the first time you remap any key. If DeckMapper says they're missing, remap one key in Web Hub once.
 
