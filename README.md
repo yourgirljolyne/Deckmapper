@@ -2,6 +2,8 @@
 
 **Remap the keys and the dial on your Corsair VANGUARD AIR 99. No iCUE required.**
 
+![DeckMapper](docs/images/deckmapper.png)
+
 DeckMapper is a small window with a picture of the keyboard. Click a key, pick what it should do, press **Apply to keyboard**. The settings are saved on the keyboard itself, so they keep working without DeckMapper running.
 
 > Not affiliated with or endorsed by Corsair. The key assignment format was worked out from Corsair's own public Web Hub app. Use at your own risk.
