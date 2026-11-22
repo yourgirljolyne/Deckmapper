@@ -87,3 +87,12 @@ Triggers: 0 turn right, 1 turn left, 2 press. Options: bit 0 = trigger on each t
 
 Web Hub switches to host-controlled mode (property 3 = 2) around the writes and back to self-operated (1) after.
 DeckMapper writes action files first, then the key mappings, assignments and dial files, and only the files whose bytes change.
+
+## Software mode (host controlled)
+
+In software mode (property 3 = 2, which SignalRGB uses for live lighting) the keyboard stops running its stored remaps
+and macros: a key whose key-mapping bit for the active layer is cleared sends nothing. Instead every key's state is
+reported on the notification channel (usage page 0xFF42, usage 2): `00 00 00 02` then a bitmap where bit *n* = key id *n*
+is down. DeckMapper's background key service reads it and plays the assignment with SendInput (keys held while held,
+media keys, mouse buttons, macros). It acts only while the keyboard is in software mode. Verified 2026-11-22 with
+SignalRGB streaming: clean lighting and working custom keys at the same time.

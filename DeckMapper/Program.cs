@@ -28,10 +28,13 @@ internal static class Program
         using var mutex = new Mutex(true, "DeckMapper.SingleInstance", out bool first);
         if (!first)
         {
-            MessageBox.Show("DeckMapper is already open.", "DeckMapper", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            // Already running (maybe just the background service): ask it to show its window.
+            if (EventWaitHandle.TryOpenExisting(BackgroundApp.ShowEventName, out var show)) { show.Set(); show.Dispose(); }
+            else MessageBox.Show("DeckMapper is already open.", "DeckMapper", MessageBoxButtons.OK, MessageBoxIcon.Information);
             return 0;
         }
-        Application.Run(new MainForm());
+        // --background: start without the window (used by "Start with Windows").
+        Application.Run(new BackgroundApp(showWindow: !args.Any(a => a.Equals("--background", StringComparison.OrdinalIgnoreCase))));
         return 0;
     }
 

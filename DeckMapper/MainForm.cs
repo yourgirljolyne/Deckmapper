@@ -18,12 +18,19 @@ internal sealed class MainForm : Form
     private readonly Panel _side = new() { Dock = DockStyle.Right, Width = 360, Padding = new Padding(14, 10, 10, 10), AutoScroll = true };
     private readonly KeyCatcher _tester = new() { Dock = DockStyle.Fill, Hint = "Key tester: click here and press keys to see what Windows receives (Alt + F4 won't close anything here)" };
     private readonly ToolStripStatusLabel _status = new() { Spring = true, TextAlign = ContentAlignment.MiddleLeft };
+    private readonly ToolStripStatusLabel _engineStatus = new() { TextAlign = ContentAlignment.MiddleRight, ForeColor = SystemColors.GrayText };
+    private readonly KeyEngine? _engine;
+    private readonly BackgroundApp? _app;
+    private readonly CheckBox _service = new() { Text = "Background key service", AutoSize = true, Margin = new Padding(0, 6, 12, 0) };
+    private readonly CheckBox _startup = new() { Text = "Start with Windows", AutoSize = true, Margin = new Padding(0, 6, 0, 0) };
     private readonly ToolTip _tips = new();
 
     private byte? _selected;
 
-    public MainForm()
+    public MainForm(KeyEngine? engine = null, BackgroundApp? app = null)
     {
+        _engine = engine;
+        _app = app;
         Text = "DeckMapper";
         Font = new Font("Segoe UI", 9.5f);
         ClientSize = new Size(1380, 680);
@@ -31,7 +38,40 @@ internal sealed class MainForm : Form
         StartPosition = FormStartPosition.CenterScreen;
 
         var top = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, Padding = new Padding(8, 6, 8, 2), WrapContents = false };
-        top.Controls.AddRange([_mainLayer, _fnLayer, Spacer(24), _apply, _undo, _reload, Spacer(24), _fPreset, _backups]);
+        top.Controls.AddRange([_mainLayer, _fnLayer, Spacer(24), _apply, _undo, _reload, Spacer(24), _fPreset, _backups, Spacer(24), _service, _startup]);
+        _service.Visible = _startup.Visible = _app != null;
+        if (_app != null)
+        {
+            _service.Checked = _app.ServiceOn;
+            _startup.Checked = Settings.StartWithWindows;
+            _startup.Enabled = _service.Checked;
+            _tips.AutoPopDelay = 30000;
+            _tips.SetToolTip(_service,
+                "Keeps your custom keys working while SignalRGB (or any app) controls the lighting.\n\n" +
+                "To show clean live lighting, SignalRGB puts the keyboard in software mode. In that mode the keyboard\n" +
+                "stops running your remaps and macros itself and hands them to the PC, like it does for iCUE.\n" +
+                "This service plays them. When the keyboard runs your keys itself, it does nothing.\n\n" +
+                "It runs in the background with no window or tray icon, also after you close DeckMapper.\n" +
+                "Start DeckMapper again to open this window; untick this to stop it.");
+            _tips.SetToolTip(_startup, "Start the background key service when you sign in to Windows (no window opens).");
+            _service.CheckedChanged += async (_, _) =>
+            {
+                _startup.Enabled = _service.Checked;
+                await _app.SetServiceAsync(_service.Checked);
+                if (!_service.Checked) _startup.Checked = false;
+                SetStatus(_service.Checked ? "Background key service on: it keeps running after you close this window."
+                    : "Background key service off: closing this window quits DeckMapper.");
+            };
+            _startup.CheckedChanged += (_, _) =>
+            {
+                if (_startup.Checked == Settings.StartWithWindows) return;
+                try { Settings.StartWithWindows = _startup.Checked; }
+                catch (Exception e) when (e is UnauthorizedAccessException or System.Security.SecurityException or IOException)
+                {
+                    SetStatus("Couldn't change Start with Windows: " + e.Message);
+                }
+            };
+        }
         _mainLayer.Checked = true;
         _apply.Font = new Font(Font, FontStyle.Bold);
 
@@ -44,6 +84,15 @@ internal sealed class MainForm : Form
         testerHost.Controls.Add(_tester);
         var status = new StatusStrip();
         status.Items.Add(_status);
+        status.Items.Add(_engineStatus);
+        if (_engine != null)
+        {
+            void ShowEngine() => _engineStatus.Text = Settings.PlayKeysInSoftwareMode ? _engine.Status : "Background key service off";
+            Action onChange = () => { if (IsHandleCreated && !IsDisposed) BeginInvoke(ShowEngine); };
+            _engine.StatusChanged += onChange;
+            FormClosed += (_, _) => _engine.StatusChanged -= onChange;
+            ShowEngine();
+        }
 
         Controls.Add(_view);
         Controls.Add(_side);
@@ -127,6 +176,7 @@ internal sealed class MainForm : Form
     {
         if (_loaded == null || _edited == null) return;
         var r = await _store.SaveAsync(_loaded, _edited, new Progress<string>(SetStatus));
+        _engine?.Reload();
         _loaded = await _store.LoadAsync();
         SetState(_loaded.Clone(), dirty: false);
         SetStatus(r.Writes.Count == 0 && r.Deleted.Count == 0 ? "Nothing to change."
@@ -157,6 +207,7 @@ internal sealed class MainForm : Form
         await RunAsync("Writing the backup to the keyboard", async () =>
         {
             int n = await _store.RestoreAsync(d.SelectedPath, new Progress<string>(SetStatus));
+            _engine?.Reload();
             _loaded = await _store.LoadAsync();
             SetState(_loaded.Clone(), dirty: false);
             SetStatus($"Backup restored ({n} file{(n == 1 ? "" : "s")} written).");
@@ -422,7 +473,7 @@ internal sealed class MainForm : Form
 
         int gaps = _edited?.Keys.Values.Count(c => c.ModifierGap && c.Main.Kind != ActionKind.Disabled) ?? 0;
         _banner.Visible = gaps > 0;
-        _bannerText.Text = $"⚠  {gaps} remapped key{(gaps == 1 ? "" : "s")} still do{(gaps == 1 ? "es" : "")} the old default when Ctrl, Alt or Shift is held (like Alt + F4 needing FN). Orange corners show which.";
+        _bannerText.Text = $"{gaps} remapped key{(gaps == 1 ? "" : "s")} still do{(gaps == 1 ? "es" : "")} the old default when Ctrl, Alt or Shift is held (like Alt + F4 needing FN). Orange corners show which.";
         _fixAll.Enabled = ready;
     }
 

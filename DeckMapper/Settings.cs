@@ -9,6 +9,28 @@ internal static class Settings
     {
         /// <summary>Key ids whose Ctrl/Alt/Shift gap shouldn't be flagged.</summary>
         public SortedSet<byte> IgnoredGapKeys { get; set; } = [];
+        /// <summary>Background key service: play custom keys from the PC while the keyboard is in software mode (SignalRGB).</summary>
+        public bool PlayKeysInSoftwareMode { get; set; } = true;
+    }
+
+    public static bool PlayKeysInSoftwareMode { get => Current.PlayKeysInSoftwareMode; set { Current.PlayKeysInSoftwareMode = value; Save(); } }
+
+    private const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
+
+    /// <summary>Starts DeckMapper in the tray at sign-in (HKCU Run key).</summary>
+    public static bool StartWithWindows
+    {
+        get
+        {
+            using var k = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(RunKey);
+            return k?.GetValue("DeckMapper") is string;
+        }
+        set
+        {
+            using var k = Microsoft.Win32.Registry.CurrentUser.CreateSubKey(RunKey);
+            if (value) k.SetValue("DeckMapper", $"\"{Environment.ProcessPath}\" --background");
+            else k.DeleteValue("DeckMapper", throwOnMissingValue: false);
+        }
     }
 
     private static readonly string FilePath = Path.Combine(
@@ -32,6 +54,11 @@ internal static class Settings
     public static void SetIgnored(byte key, bool ignored)
     {
         if (ignored) Current.IgnoredGapKeys.Add(key); else Current.IgnoredGapKeys.Remove(key);
+        Save();
+    }
+
+    private static void Save()
+    {
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);
