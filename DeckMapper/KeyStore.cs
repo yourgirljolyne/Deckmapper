@@ -542,7 +542,7 @@ public sealed class KeyStore : IDisposable
 
         // Action files first, then the files that point at them.
         var order = result.Writes;
-        await b.SetPropertyAsync(Bragi.PropOperatingMode, Bragi.ModeHostControlled);
+        bool switched = await b.EnterHostControlAsync();
         try
         {
             int i = 0;
@@ -560,7 +560,7 @@ public sealed class KeyStore : IDisposable
             status?.Report("Telling the keyboard to reload its keys");
             await BumpCookieAsync(b, fresh.ProfileId);
         }
-        finally { await b.SetPropertyAsync(Bragi.PropOperatingMode, Bragi.ModeSelfOperated); }
+        finally { await b.LeaveHostControlAsync(switched); }
         foreach (var n in plan.Notes) Log?.Invoke(n);
         return result;
     }
@@ -626,7 +626,7 @@ public sealed class KeyStore : IDisposable
         var ids = m.Files.Where(id => !skip.Contains(id)).OrderBy(id => pointers.Contains(id) ? 1 : 0).ToList();
         var b = await DeviceAsync();
         int written = 0;
-        await b.SetPropertyAsync(Bragi.PropOperatingMode, Bragi.ModeHostControlled);
+        bool switched = await b.EnterHostControlAsync();
         try
         {
             foreach (var id in ids)
@@ -639,7 +639,7 @@ public sealed class KeyStore : IDisposable
             }
             if (written > 0) await BumpCookieAsync(b, m.ProfileId);
         }
-        finally { await b.SetPropertyAsync(Bragi.PropOperatingMode, Bragi.ModeSelfOperated); }
+        finally { await b.LeaveHostControlAsync(switched); }
         return written;
     }
 }
