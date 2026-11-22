@@ -6,6 +6,8 @@ namespace DeckMapper;
 /// send nothing, and every key's up/down state is reported on the notification channel (usage page 0xFF42, usage 2)
 /// as a bitmap indexed by key id. That's what iCUE reads; this does the same with DeckMapper's assignments.
 /// In self-operated mode the engine does nothing, because the keyboard runs its assignments itself.
+/// When Admiral (the background program for all the Deck apps) is running, it plays the keys instead and this
+/// engine steps back, so no key is ever typed twice.
 /// </summary>
 internal sealed class KeyEngine : IDisposable
 {
@@ -52,11 +54,39 @@ internal sealed class KeyEngine : IDisposable
         _cts?.Cancel();
         if (_run != null) try { await _run; } catch { /* stopping */ }
         ReleaseAll();
+        SetPlayingMarker(false);
         SetStatus("Off", false);
     }
 
-    /// <summary>Re-read the assignments (after DeckMapper applied changes).</summary>
-    public void Reload() => _reload = true;
+    /// <summary>Re-read the assignments (after DeckMapper applied changes), here and in Admiral.</summary>
+    public void Reload()
+    {
+        _reload = true;
+        if (EventWaitHandle.TryOpenExisting(AdmiralReloadKeys, out var ev)) { ev.Set(); ev.Dispose(); }
+    }
+
+    // ---------------- Admiral ----------------
+
+    private const string AdmiralInstance = "Admiral.SingleInstance", AdmiralReloadKeys = "Admiral.ReloadKeys";
+    /// <summary>Exists while this engine plays keys, so Admiral knows to leave them alone.</summary>
+    private const string KeyServiceName = "DeckMapper.KeyService";
+    private Mutex? _playingMarker;
+
+    public static bool AdmiralRunning
+    {
+        get
+        {
+            if (!Mutex.TryOpenExisting(AdmiralInstance, out var m)) return false;
+            m.Dispose();
+            return true;
+        }
+    }
+
+    private void SetPlayingMarker(bool on)
+    {
+        if (on) _playingMarker ??= new Mutex(false, KeyServiceName);
+        else { _playingMarker?.Dispose(); _playingMarker = null; }
+    }
 
     private void SetStatus(string s, bool active)
     {
@@ -80,6 +110,7 @@ internal sealed class KeyEngine : IDisposable
                 Log?.Invoke("engine: " + e.Message);
             }
             ReleaseAll();
+            SetPlayingMarker(false);
             SetStatus("Waiting for the keyboard (USB cable)", false);
             try { await Task.Delay(TimeSpan.FromSeconds(3), ct); } catch (OperationCanceledException) { break; }
         }
@@ -101,18 +132,26 @@ internal sealed class KeyEngine : IDisposable
                 while (!ct.IsCancellationRequested && !reader.IsCompleted)
                 {
                     uint mode = await bragi.GetPropertyAsync(Bragi.PropOperatingMode);
-                    if (mode == Bragi.ModeHostControlled)
+                    if (mode == Bragi.ModeHostControlled && AdmiralRunning)
+                    {
+                        if (Active) ReleaseAll();
+                        SetPlayingMarker(false);
+                        SetStatus("Admiral is playing your custom keys", false);
+                    }
+                    else if (mode == Bragi.ModeHostControlled)
                     {
                         if (_reload || !Active)
                         {
                             await LoadAsync();
                             _reload = false;
                         }
+                        SetPlayingMarker(true);
                         SetStatus("Keyboard in software mode (SignalRGB?): DeckMapper is playing your custom keys", true);
                     }
                     else
                     {
                         if (Active) ReleaseAll();
+                        SetPlayingMarker(false);
                         SetStatus("Keyboard runs your custom keys itself", false);
                     }
                     await Task.WhenAny(reader, Task.Delay(ModePoll, ct));
@@ -283,5 +322,6 @@ internal sealed class KeyEngine : IDisposable
     {
         _cts?.Cancel();
         ReleaseAll();
+        SetPlayingMarker(false);
     }
 }

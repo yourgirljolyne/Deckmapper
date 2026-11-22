@@ -50,7 +50,8 @@ internal sealed class BackgroundApp : ApplicationContext
             _window.FormClosed += (_, _) =>
             {
                 _window = null;
-                if (!Settings.PlayKeysInSoftwareMode) Exit();
+                // Nothing to do in the background without the service, or while Admiral plays the keys.
+                if (!Settings.PlayKeysInSoftwareMode || KeyEngine.AdmiralRunning) Exit();
             };
             _window.Show();
         }
