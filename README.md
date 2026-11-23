@@ -42,7 +42,11 @@ The profile needs key assignment files, which Web Hub creates the first time you
 DeckMapper dump              # print every remapped key and dial mode (read-only)
 DeckMapper check             # confirm DeckMapper would write nothing for an unchanged setup (read-only)
 DeckMapper restore <folder>  # put a backup back
+DeckMapper import <folder>   # show how a backup's keys would go into the profile the keyboard has now (read-only)
+DeckMapper import <folder> --apply  # and do it
 ```
+
+`import` is for when a backup no longer fits because the profile was replaced, for example after iCUE created a new one (its files then reuse the old profile's file numbers, so `restore` refuses). It copies the backup's assignments, key mappings and dial modes as they are into the new profile's slots, after checking that every action and macro file they point to is still on the keyboard. Nothing is deleted, every write is read back, and a backup of what was there goes to `%LOCALAPPDATA%\DeckMapperackups` first.
 
 ## Build it yourself
 

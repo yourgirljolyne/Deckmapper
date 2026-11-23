@@ -10,7 +10,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>DeckMapper</AssemblyName>
     <RootNamespace>DeckMapper</RootNamespace>
-    <Version>1.2.0</Version>
+    <Version>1.2.1</Version>
     <!-- No designer: controls are built in code -->
     <NoWarn>$(NoWarn);WFO1000</NoWarn>
   </PropertyGroup>

@@ -136,6 +136,12 @@ public sealed class KeyStore : IDisposable
     private Bragi? _b;
     public Action<string>? Log { get; set; }
 
+    /// <summary>
+    /// Files to read from here instead of the keyboard (an import from a backup: the old profile structure), by id.
+    /// Every other file still comes from the keyboard.
+    /// </summary>
+    public Dictionary<ushort, byte[]>? Snapshot { get; set; }
+
     public static string BackupRoot => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DeckMapper", "backups");
 
@@ -176,6 +182,7 @@ public sealed class KeyStore : IDisposable
     {
         if (id == 0) return null;
         if (files.TryGetValue(id, out var cached)) return cached;
+        if (Snapshot != null && Snapshot.TryGetValue(id, out var snap)) return files[id] = snap;
         var b = await DeviceAsync();
         var d = await b.ReadFileAsync(id);
         if (d != null) files[id] = d;
@@ -372,7 +379,8 @@ public sealed class KeyStore : IDisposable
     /// the keyboard is re-read first and nothing is written if it changed in the meantime. A backup is saved before writing.
     /// Returns the backup folder.
     /// </summary>
-    public async Task<SaveResult> SaveAsync(KeyboardState loaded, KeyboardState edited, IProgress<string>? status = null, bool dryRun = false)
+    public async Task<SaveResult> SaveAsync(KeyboardState loaded, KeyboardState edited, IProgress<string>? status = null, bool dryRun = false,
+        bool deleteUnused = true)
     {
         status?.Report("Checking the keyboard");
         var fresh = await LoadAsync();
@@ -525,14 +533,21 @@ public sealed class KeyStore : IDisposable
         }
 
         foreach (var (id, bytes) in owner)
-            if (!fresh.Files.TryGetValue(id, out var old) || !old.SequenceEqual(bytes)) plan.Writes[id] = bytes;
+        {
+            if (fresh.Files.TryGetValue(id, out var old) && old.SequenceEqual(bytes)) continue;
+            // Not part of the profile as loaded (an import reuses the old action files): compare with the keyboard.
+            if (!fresh.Files.ContainsKey(id) && await b.ReadFileAsync(id) is { } onKeyboard && onKeyboard.SequenceEqual(bytes)) continue;
+            plan.Writes[id] = bytes;
+        }
         byte[] assignBytes = [.. newAssign];
         if (!assignBytes.SequenceEqual(fresh.Files.GetValueOrDefault(fresh.AssignFile) ?? [])) plan.Writes[fresh.AssignFile] = assignBytes;
         if (!map.SequenceEqual(fresh.MapBytes)) plan.Writes[fresh.MapFile] = map;
         if (newDial != null && !newDial.SequenceEqual(fresh.Files.GetValueOrDefault(fresh.DialFile) ?? [])) plan.Writes[fresh.DialFile] = newDial;
 
         // DeckMapper's own action files that nothing points at any more.
-        var stale = fresh.Files.Keys.Where(id => id is >= OwnBottom and <= OwnTop && !plan.Referenced.Contains(id)).ToList();
+        var stale = deleteUnused
+            ? fresh.Files.Keys.Where(id => id is >= OwnBottom and <= OwnTop && !plan.Referenced.Contains(id)).ToList()
+            : [];
 
         var result = new SaveResult(backup, order0(), stale);
         List<ushort> order0() => plan.Writes.Keys.OrderBy(id => id == fresh.AssignFile || id == fresh.MapFile || id == fresh.DialFile ? 1 : 0)
@@ -551,6 +566,9 @@ public sealed class KeyStore : IDisposable
                 status?.Report($"Writing {++i} of {order.Count}");
                 Log?.Invoke($"write {id}: {Convert.ToHexString(plan.Writes[id])}");
                 await b.WriteFileAsync(id, plan.Writes[id]);
+                // Read every write back: a write that went anywhere else stops here, before anything points at it.
+                if (!(await b.ReadFileAsync(id) ?? []).AsSpan().SequenceEqual(plan.Writes[id]))
+                    throw new BragiException($"File {id} didn't read back as written. Nothing after it was written; a backup is in {backup}.");
             }
             foreach (var id in stale)
             {
@@ -583,6 +601,49 @@ public sealed class KeyStore : IDisposable
             if (p[i] != updated[i] && i is < 2 or > 5) throw new InvalidOperationException("cookie update would change more than the cookie");
         Log?.Invoke($"cookie {old} -> {now}");
         await b.WriteFileAsync(profileId, updated);
+    }
+
+    /// <summary>
+    /// Writes key files (assignments, key mappings, dial modes) exactly as given into the current profile's slots, after
+    /// checking that every action file the imported state points at exists on the keyboard. Each write is read back.
+    /// Backs up first, writes in host-controlled mode, then bumps the profile cookie. Deletes nothing.
+    /// </summary>
+    public async Task<SaveResult> MoveKeyFilesAsync(KeyboardState current, Dictionary<ushort, byte[]> moves, KeyboardState imported, bool apply)
+    {
+        var fresh = await LoadAsync();
+        if (fresh.ProfileId != current.ProfileId || fresh.AssignFile != current.AssignFile || fresh.MapFile != current.MapFile)
+            throw new BragiException("The keyboard's profile changed since it was read. Nothing written.");
+
+        var b = await DeviceAsync();
+        var needed = imported.Keys.Values.SelectMany(c => c.Others.Select(o => o.FileId)
+                .Concat(new[] { c.MainFile, c.FnFile }))
+            .Concat(imported.Dial.SelectMany(m => m.Actions.Select(a => a.FileId)))
+            .Where(id => id != 0).Distinct().ToList();
+        // Assignments of mirrored Ctrl/Alt/Shift layers point at the main file, already in the list.
+        var missing = new List<ushort>();
+        foreach (var id in needed) if (!await b.FileExistsAsync(id)) missing.Add(id);
+        if (missing.Count > 0) throw new BragiException("These files the old keys point at are missing: " + string.Join(", ", missing) + ". Nothing written.");
+        Log?.Invoke($"all {needed.Count} action files the old keys use are on the keyboard");
+
+        var writes = moves.Where(m => !(fresh.Files.GetValueOrDefault(m.Key) ?? []).SequenceEqual(m.Value)).Select(m => m.Key)
+            .OrderBy(id => id == fresh.MapFile ? 0 : 1).ToList();
+        if (!apply || writes.Count == 0) return new SaveResult(null, writes, []);
+
+        string backup = SaveBackup(fresh, "before-import");
+        bool switched = await b.EnterHostControlAsync();
+        try
+        {
+            foreach (var id in writes)
+            {
+                Log?.Invoke($"write {id}: {Convert.ToHexString(moves[id])}");
+                await b.WriteFileAsync(id, moves[id]);
+                if (!(await b.ReadFileAsync(id) ?? []).AsSpan().SequenceEqual(moves[id]))
+                    throw new BragiException($"File {id} didn't read back as written. Stopped; a backup is in {backup}.");
+            }
+            await BumpCookieAsync(b, fresh.ProfileId);
+        }
+        finally { await b.LeaveHostControlAsync(switched); }
+        return new SaveResult(backup, writes, []);
     }
 
     /// <summary>What a save wrote (or would write): file ids in write order, and DeckMapper files it deleted.</summary>
@@ -635,6 +696,8 @@ public sealed class KeyStore : IDisposable
                 if (current.Files.TryGetValue(id, out var now) && now.SequenceEqual(bytes)) continue;
                 status?.Report($"Restoring file {id}");
                 await b.WriteFileAsync(id, bytes);
+                if (!(await b.ReadFileAsync(id) ?? []).AsSpan().SequenceEqual(bytes))
+                    throw new BragiException($"File {id} didn't read back as written. Stopped; the files from before are in the newest before-restore backup.");
                 written++;
             }
             if (written > 0) await BumpCookieAsync(b, m.ProfileId);
