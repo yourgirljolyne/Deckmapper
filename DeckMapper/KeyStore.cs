@@ -114,6 +114,15 @@ public sealed class KeyboardState
     public string ProfileName = "";
     /// <summary>Key order in the loaded assignments file (kept on save so an unchanged layout writes nothing).</summary>
     public List<byte> AssignOrder = [];
+    /// <summary>
+    /// The profile's own files: the profile list, the profile file and every file it points at (assignments, key
+    /// mappings, dial, lighting, screens). Never a key's action file, so DeckMapper never writes an action into one.
+    /// </summary>
+    public HashSet<ushort> ProfileFiles = [];
+    /// <summary>Assignments that pointed at one of <see cref="ProfileFiles"/> and were dropped while loading (key, file).</summary>
+    public List<(byte key, ushort file)> BrokenRefs = [];
+    /// <summary>The layers those dropped assignments were on (key, flags): loaded as Default, not as disabled.</summary>
+    public HashSet<(byte key, ushort flags)> BrokenLayers = [];
 
     public KeyboardState Clone()
     {
@@ -210,6 +219,13 @@ public sealed class KeyStore : IDisposable
         s.MapFile = U(14);
         s.DialFile = U(18);
         int nameLen = U(30);
+        // 2026-11-23: after iCUE recreated the profile and the old keys were imported, the Copilot key still pointed at
+        // file 28003, which by then was the new profile's assignments file. Changing Copilot wrote its action over the
+        // assignments. Those references are dropped here (the key goes back to its default) and never reused.
+        s.ProfileFiles.Add(15);
+        s.ProfileFiles.Add(s.ProfileId);
+        for (int o = 6; o <= 28; o += 2) if (U(o) != 0) s.ProfileFiles.Add(U(o));
+        if (p.Length >= 34 && U(p.Length - 2) != 0) s.ProfileFiles.Add(U(p.Length - 2)); // screen list
         if (32 + nameLen <= p.Length) s.ProfileName = System.Text.Encoding.UTF8.GetString(p, 32, nameLen).TrimEnd('\0');
         if (s.MapFile == 0 || s.AssignFile == 0)
             throw new BragiException("This profile has no key assignment files yet. Remap any key once in Corsair Web Hub, then try again.");
@@ -233,9 +249,13 @@ public sealed class KeyStore : IDisposable
                 a += 2;
                 var lst = raw.TryGetValue(key, out var e) ? e : raw[key] = [];
                 for (int j = 0; j < n && a + 6 <= assign.Length; j++, a += 6)
-                    lst.Add(new(BinaryPrimitives.ReadUInt16LittleEndian(assign.AsSpan(a)),
+                {
+                    var ra = new RawAssign(BinaryPrimitives.ReadUInt16LittleEndian(assign.AsSpan(a)),
                         BinaryPrimitives.ReadUInt16LittleEndian(assign.AsSpan(a + 2)),
-                        BinaryPrimitives.ReadUInt16LittleEndian(assign.AsSpan(a + 4))));
+                        BinaryPrimitives.ReadUInt16LittleEndian(assign.AsSpan(a + 4)));
+                    if (s.ProfileFiles.Contains(ra.FileId)) { s.BrokenRefs.Add((key, ra.FileId)); s.BrokenLayers.Add((key, ra.Flags)); continue; }
+                    lst.Add(ra);
+                }
             }
         }
 
@@ -245,7 +265,7 @@ public sealed class KeyStore : IDisposable
             var c = new KeyConfig { OriginalMapByte = MapByte(s.MapBytes, pk.Id) };
             var list2 = raw.TryGetValue(pk.Id, out var r) ? r : [];
             RawAssign? Get(ushort f) => list2.FirstOrDefault(x => x.Flags == f);
-            bool Cleared(ushort f) => c.OriginalMapByte != 0 && (c.OriginalMapByte & (1 << Flags.Bit(f))) == 0;
+            bool Cleared(ushort f) => c.OriginalMapByte != 0 && (c.OriginalMapByte & (1 << Flags.Bit(f))) == 0 && !s.BrokenLayers.Contains((pk.Id, f));
 
             async Task<KeyAction> LayerAsync(ushort f)
             {
@@ -299,6 +319,7 @@ public sealed class KeyStore : IDisposable
                 for (int j = 0; j < n && d + 6 <= dial.Length; j++, d += 6)
                 {
                     ushort file = BinaryPrimitives.ReadUInt16LittleEndian(dial.AsSpan(d + 4));
+                    if (s.ProfileFiles.Contains(file)) { s.BrokenRefs.Add((0, file)); continue; }
                     m.Actions.Add(new(dial[d], BinaryPrimitives.ReadUInt16LittleEndian(dial.AsSpan(d + 2)),
                         await ReadActionAsync(file, s.Files), file));
                 }
@@ -413,7 +434,7 @@ public sealed class KeyStore : IDisposable
         {
             for (ushort id = freshIds.Count > 0 ? freshIds.Dequeue() : OwnTop; id >= OwnBottom; id--)
             {
-                if (used.Contains(id) || fresh.Files.ContainsKey(id)) continue;
+                if (used.Contains(id) || fresh.Files.ContainsKey(id) || fresh.ProfileFiles.Contains(id)) continue;
                 if (await b.FileExistsAsync(id)) continue;
                 used.Add(id);
                 freshIds.Enqueue((ushort)(id - 1));
@@ -426,7 +447,7 @@ public sealed class KeyStore : IDisposable
         async Task<ushort> FileForAsync(KeyAction a, ushort previous)
         {
             var bytes = EncodeAction(a);
-            if (previous != 0 && !used.Contains(previous)) { used.Add(previous); owner[previous] = bytes; return previous; }
+            if (previous != 0 && !used.Contains(previous) && !fresh.ProfileFiles.Contains(previous)) { used.Add(previous); owner[previous] = bytes; return previous; }
             var id = await NewIdAsync();
             owner[id] = bytes;
             return id;
@@ -532,6 +553,13 @@ public sealed class KeyStore : IDisposable
             newDial = [.. d];
         }
 
+        // Last line of defence: an action file never goes into one of the profile's own files.
+        var clash = owner.Keys.Where(fresh.ProfileFiles.Contains).ToList();
+        if (clash.Count > 0)
+            throw new BragiException($"DeckMapper was about to write a key action into file {string.Join(", ", clash)}, which belongs to the profile itself. Nothing was written.");
+        foreach (var b2 in fresh.BrokenRefs)
+            plan.Notes.Add(b2.key == 0 ? $"a dial action pointed at profile file {b2.file}; removed" : $"key {b2.key} pointed at profile file {b2.file}; reset to its default");
+
         foreach (var (id, bytes) in owner)
         {
             if (fresh.Files.TryGetValue(id, out var old) && old.SequenceEqual(bytes)) continue;
@@ -620,6 +648,10 @@ public sealed class KeyStore : IDisposable
             .Concat(imported.Dial.SelectMany(m => m.Actions.Select(a => a.FileId)))
             .Where(id => id != 0).Distinct().ToList();
         // Assignments of mirrored Ctrl/Alt/Shift layers point at the main file, already in the list.
+        var clashes = needed.Where(fresh.ProfileFiles.Contains).ToList();
+        if (clashes.Count > 0)
+            throw new BragiException("The old keys point at files that now belong to the new profile itself: " + string.Join(", ", clashes)
+                + ". Nothing written; changing those keys would overwrite the profile.");
         var missing = new List<ushort>();
         foreach (var id in needed) if (!await b.FileExistsAsync(id)) missing.Add(id);
         if (missing.Count > 0) throw new BragiException("These files the old keys point at are missing: " + string.Join(", ", missing) + ". Nothing written.");
